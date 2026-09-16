@@ -1,12 +1,25 @@
 extends Node2D
 
 const SPEED := 260.0
-const REQUIRED_POINTS := 4
+const INTERACT_DISTANCE := 65.0
+const TARGET_TOLERANCE := 55.0
+const NPC_POSITION := Vector2(170, 360)
+const TARGETS: Array[Vector2] = [
+	Vector2(350, 220),
+	Vector2(930, 210),
+	Vector2(990, 550),
+	Vector2(300, 570)
+]
 
-var player_position := Vector2(640, 360)
+enum MissionState { NOT_STARTED, ACTIVE, READY_TO_DELIVER, COMPLETED }
+
+var player_position := Vector2(250, 360)
 var measured_points: Array[Vector2] = []
+var measured_target_indices: Array[int] = []
+var mission_state := MissionState.NOT_STARTED
 var money := 0
 var xp := 0
+var status_message := "Köylünün yanına git ve SPACE/ENTER ile konuş."
 
 func _ready() -> void:
 	queue_redraw()
@@ -14,47 +27,112 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var direction := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	player_position += direction * SPEED * delta
-	player_position.x = clamp(player_position.x, 40.0, 1240.0)
-	player_position.y = clamp(player_position.y, 100.0, 680.0)
+	player_position.x = clamp(player_position.x, 35.0, 1245.0)
+	player_position.y = clamp(player_position.y, 105.0, 685.0)
 	queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_accept") and measured_points.size() < REQUIRED_POINTS:
-		measured_points.append(player_position)
-		if measured_points.size() == REQUIRED_POINTS:
+	if not event.is_action_pressed("ui_accept"):
+		return
+
+	if player_position.distance_to(NPC_POSITION) <= INTERACT_DISTANCE:
+		_interact_with_npc()
+	elif mission_state == MissionState.ACTIVE:
+		_try_measure_target()
+	elif mission_state == MissionState.READY_TO_DELIVER:
+		status_message = "Ölçüm tamam. Sonuçları teslim etmek için köylüye dön."
+	else:
+		status_message = "Burada etkileşime girecek bir şey yok."
+	queue_redraw()
+
+func _interact_with_npc() -> void:
+	match mission_state:
+		MissionState.NOT_STARTED:
+			mission_state = MissionState.ACTIVE
+			status_message = "Görev: Sınır Meselesi — dört sarı köşe noktasını ölç."
+		MissionState.ACTIVE:
+			status_message = "Önce dört sınır noktasını ölçmelisin."
+		MissionState.READY_TO_DELIVER:
+			mission_state = MissionState.COMPLETED
 			money += 250
 			xp += 100
-		queue_redraw()
+			status_message = "İş teslim edildi! +250 para, +100 XP."
+		MissionState.COMPLETED:
+			status_message = "Köylü: Artık sınırımızı biliyoruz. Teşekkürler, haritacı!"
 
-func _draw() -> void:
-	# Prototype terrain
-	draw_rect(Rect2(0, 0, 1280, 720), Color("1c3827"))
-	draw_rect(Rect2(0, 0, 1280, 82), Color("101820"))
+func _try_measure_target() -> void:
+	var closest_index := -1
+	var closest_distance := INF
+	for i in range(TARGETS.size()):
+		if i in measured_target_indices:
+			continue
+		var distance := player_position.distance_to(TARGETS[i])
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_index = i
 
-	# Mission target markers
-	var targets := [Vector2(350, 220), Vector2(930, 210), Vector2(990, 550), Vector2(300, 570)]
-	for target in targets:
-		draw_circle(target, 10, Color("e7c75f"))
-		draw_circle(target, 18, Color("e7c75f"), false, 2.0)
+	if closest_index == -1 or closest_distance > TARGET_TOLERANCE:
+		status_message = "Ölçüm için sarı sınır noktasına biraz daha yaklaş."
+		return
 
-	# Measured parcel
-	for i in range(measured_points.size()):
-		draw_circle(measured_points[i], 7, Color("55e6a5"))
-		if i > 0:
-			draw_line(measured_points[i - 1], measured_points[i], Color("55e6a5"), 3.0)
-	if measured_points.size() == REQUIRED_POINTS:
-		draw_line(measured_points[-1], measured_points[0], Color("55e6a5"), 3.0)
+	measured_target_indices.append(closest_index)
+	measured_points.append(TARGETS[closest_index])
+	status_message = "P%d ölçüldü. (%d/%d)" % [closest_index + 1, measured_points.size(), TARGETS.size()]
 
-	# Player placeholder
-	draw_circle(player_position, 18, Color("4db6ff"))
-	draw_line(player_position, player_position + Vector2(0, -28), Color.WHITE, 4.0)
-
-	# HUD
-	draw_string(ThemeDB.fallback_font, Vector2(24, 34), "SURVEYOR BEYOND  |  M0: İlk Ölçüm", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, Vector2(24, 65), "Yön tuşları: hareket  •  SPACE/ENTER: nokta ölç", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("b7c9d3"))
-	draw_string(ThemeDB.fallback_font, Vector2(920, 34), "Ölçülen: %d/%d   Para: %d   XP: %d" % [measured_points.size(), REQUIRED_POINTS, money, xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
-
-	if measured_points.size() == REQUIRED_POINTS:
+	if measured_points.size() == TARGETS.size():
+		mission_state = MissionState.READY_TO_DELIVER
 		var area := SurveyMath.polygon_area(measured_points)
 		var perimeter := SurveyMath.polygon_perimeter(measured_points)
-		draw_string(ThemeDB.fallback_font, Vector2(430, 120), "GÖREV TAMAMLANDI  Alan: %.1f m²  Çevre: %.1f m" % [area, perimeter], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("55e6a5"))
+		status_message = "Ölçüm tamam: %.1f m² / %.1f m. Köylüye dön." % [area, perimeter]
+
+func _draw() -> void:
+	# Prototype terrain and road.
+	draw_rect(Rect2(0, 0, 1280, 720), Color("1c3827"))
+	draw_rect(Rect2(0, 0, 1280, 82), Color("101820"))
+	draw_rect(Rect2(0, 330, 1280, 90), Color("5b513f"))
+
+	# NPC.
+	draw_circle(NPC_POSITION, 22, Color("d99a55"))
+	draw_string(ThemeDB.fallback_font, NPC_POSITION + Vector2(-34, -34), "Köylü", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+	if player_position.distance_to(NPC_POSITION) <= INTERACT_DISTANCE:
+		draw_circle(NPC_POSITION, INTERACT_DISTANCE, Color("f5d76e"), false, 2.0)
+
+	# Parcel targets.
+	for i in range(TARGETS.size()):
+		var target := TARGETS[i]
+		var done := i in measured_target_indices
+		var marker_color := Color("55e6a5") if done else Color("e7c75f")
+		draw_circle(target, 10, marker_color)
+		draw_circle(target, 18, marker_color, false, 2.0)
+		draw_string(ThemeDB.fallback_font, target + Vector2(22, 6), "P%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, marker_color)
+
+	# Correct parcel boundary is shown progressively in target order after measurement.
+	for i in range(measured_points.size() - 1):
+		draw_line(measured_points[i], measured_points[i + 1], Color("55e6a5"), 3.0)
+	if measured_points.size() == TARGETS.size():
+		draw_line(measured_points[-1], measured_points[0], Color("55e6a5"), 3.0)
+
+	# Player placeholder and survey pole.
+	draw_circle(player_position, 18, Color("4db6ff"))
+	draw_line(player_position, player_position + Vector2(0, -30), Color.WHITE, 4.0)
+	draw_circle(player_position + Vector2(0, -34), 5, Color("e7c75f"))
+
+	# HUD.
+	draw_string(ThemeDB.fallback_font, Vector2(24, 32), "SURVEYOR BEYOND  |  M0: İlk Ölçüm", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(24, 62), status_message, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("b7c9d3"))
+	draw_string(ThemeDB.fallback_font, Vector2(960, 32), "Para: %d   XP: %d" % [money, xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+
+	var mission_text := _mission_label()
+	draw_string(ThemeDB.fallback_font, Vector2(930, 62), mission_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e7c75f"))
+
+func _mission_label() -> String:
+	match mission_state:
+		MissionState.NOT_STARTED:
+			return "Görev: Henüz alınmadı"
+		MissionState.ACTIVE:
+			return "Sınır Meselesi %d/4" % measured_points.size()
+		MissionState.READY_TO_DELIVER:
+			return "Sınır Meselesi: TESLİM ET"
+		MissionState.COMPLETED:
+			return "Sınır Meselesi: TAMAMLANDI"
+	return ""
