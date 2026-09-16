@@ -8,6 +8,8 @@ const JOYSTICK_CENTER := Vector2(135, 585)
 const JOYSTICK_RADIUS := 82.0
 const ACTION_CENTER := Vector2(1135, 585)
 const ACTION_RADIUS := 64.0
+const ACCEPT_RECT := Rect2(720, 515, 190, 64)
+const REJECT_RECT := Rect2(930, 515, 190, 64)
 const TARGETS: Array[Vector2] = [Vector2(350, 220), Vector2(930, 210), Vector2(990, 550), Vector2(300, 570)]
 
 enum MissionState { NOT_STARTED, ACTIVE, READY_TO_DELIVER, COMPLETED }
@@ -18,8 +20,8 @@ var measured_target_indices: Array[int] = []
 var mission_state := MissionState.NOT_STARTED
 var money := 0
 var xp := 0
-var status_message := "Köylünün yanına git ve ETKİLEŞİM düğmesine dokun."
-
+var status_message := "Köylünün yanına git ve KONUŞ düğmesine dokun."
+var mission_offer_open := false
 var move_touch_id := -1
 var action_touch_id := -1
 var joystick_knob := JOYSTICK_CENTER
@@ -29,10 +31,10 @@ func _ready() -> void:
 	queue_redraw()
 
 func _process(delta: float) -> void:
-	# Keyboard remains available for desktop development, but touch is the primary control.
 	var keyboard_vector := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	var direction := touch_move_vector if touch_move_vector.length() > 0.01 else keyboard_vector
-	player_position += direction.normalized() * SPEED * delta
+	if not mission_offer_open:
+		player_position += direction.normalized() * SPEED * delta
 	player_position.x = clamp(player_position.x, 35.0, 1245.0)
 	player_position.y = clamp(player_position.y, 105.0, 685.0)
 	queue_redraw()
@@ -42,11 +44,17 @@ func _input(event: InputEvent) -> void:
 		_handle_screen_touch(event)
 	elif event is InputEventScreenDrag:
 		_handle_screen_drag(event)
-	elif event.is_action_pressed("ui_accept"):
+	elif event.is_action_pressed("ui_accept") and not mission_offer_open:
 		perform_action()
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if event.pressed:
+		if mission_offer_open:
+			if ACCEPT_RECT.has_point(event.position):
+				_accept_mission()
+			elif REJECT_RECT.has_point(event.position):
+				_reject_mission()
+			return
 		if event.position.distance_to(ACTION_CENTER) <= ACTION_RADIUS * 1.35 and action_touch_id == -1:
 			action_touch_id = event.index
 			perform_action()
@@ -63,7 +71,7 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	queue_redraw()
 
 func _handle_screen_drag(event: InputEventScreenDrag) -> void:
-	if event.index == move_touch_id:
+	if event.index == move_touch_id and not mission_offer_open:
 		_update_joystick(event.position)
 		queue_redraw()
 
@@ -88,8 +96,10 @@ func perform_action() -> void:
 func _interact_with_npc() -> void:
 	match mission_state:
 		MissionState.NOT_STARTED:
-			mission_state = MissionState.ACTIVE
-			status_message = "Sınır Meselesi başladı — dört sarı köşe noktasını ölç."
+			mission_offer_open = true
+			touch_move_vector = Vector2.ZERO
+			joystick_knob = JOYSTICK_CENTER
+			status_message = "Görev teklifi açıldı."
 		MissionState.ACTIVE:
 			status_message = "Köylü: Önce dört sınır noktasını ölçmelisin."
 		MissionState.READY_TO_DELIVER:
@@ -99,6 +109,17 @@ func _interact_with_npc() -> void:
 			status_message = "İş teslim edildi! +250 para, +100 XP."
 		MissionState.COMPLETED:
 			status_message = "Köylü: Artık sınırımızı biliyoruz. Teşekkürler, haritacı!"
+
+func _accept_mission() -> void:
+	mission_offer_open = false
+	mission_state = MissionState.ACTIVE
+	status_message = "Sınır Meselesi başladı — dört sarı köşe noktasını ölç."
+	queue_redraw()
+
+func _reject_mission() -> void:
+	mission_offer_open = false
+	status_message = "Görevi şimdilik reddettin. İstersen köylüyle tekrar konuşabilirsin."
+	queue_redraw()
 
 func _try_measure_target() -> void:
 	var closest_index := -1
@@ -123,18 +144,15 @@ func _try_measure_target() -> void:
 		status_message = "Ölçüm tamam: %.1f m² / %.1f m. Köylüye dön." % [area, perimeter]
 
 func _draw() -> void:
-	# Prototype world.
 	draw_rect(Rect2(0, 0, 1280, 720), Color("1c3827"))
 	draw_rect(Rect2(0, 0, 1280, 82), Color("101820"))
 	draw_rect(Rect2(0, 330, 1280, 90), Color("5b513f"))
 
-	# NPC.
 	draw_circle(NPC_POSITION, 22, Color("d99a55"))
 	draw_string(ThemeDB.fallback_font, NPC_POSITION + Vector2(-34, -34), "Köylü", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 	if player_position.distance_to(NPC_POSITION) <= INTERACT_DISTANCE:
 		draw_circle(NPC_POSITION, INTERACT_DISTANCE, Color("f5d76e"), false, 2.0)
 
-	# Survey targets.
 	for i in range(TARGETS.size()):
 		var target := TARGETS[i]
 		var done := i in measured_target_indices
@@ -147,27 +165,43 @@ func _draw() -> void:
 	if measured_points.size() == TARGETS.size():
 		draw_line(measured_points[-1], measured_points[0], Color("55e6a5"), 3.0)
 
-	# Player.
 	draw_circle(player_position, 18, Color("4db6ff"))
 	draw_line(player_position, player_position + Vector2(0, -30), Color.WHITE, 4.0)
 	draw_circle(player_position + Vector2(0, -34), 5, Color("e7c75f"))
 
-	# HUD.
 	draw_string(ThemeDB.fallback_font, Vector2(24, 32), "SURVEYOR BEYOND  |  M0: İlk Ölçüm", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(24, 62), status_message, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("b7c9d3"))
 	draw_string(ThemeDB.fallback_font, Vector2(960, 32), "Para: %d   XP: %d" % [money, xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(930, 62), _mission_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e7c75f"))
 
-	# Mobile virtual joystick.
-	draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.05, 0.08, 0.10, 0.55))
-	draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.75, 0.85, 0.90, 0.55), false, 3.0)
-	draw_circle(joystick_knob, 34, Color(0.75, 0.85, 0.90, 0.82))
+	if not mission_offer_open:
+		draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.05, 0.08, 0.10, 0.55))
+		draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.75, 0.85, 0.90, 0.55), false, 3.0)
+		draw_circle(joystick_knob, 34, Color(0.75, 0.85, 0.90, 0.82))
+		var action_color := Color("55e6a5") if _has_context_action() else Color(0.35, 0.40, 0.43, 0.72)
+		draw_circle(ACTION_CENTER, ACTION_RADIUS, action_color)
+		draw_circle(ACTION_CENTER, ACTION_RADIUS, Color.WHITE, false, 3.0)
+		draw_string(ThemeDB.fallback_font, ACTION_CENTER + Vector2(-39, 6), _action_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("101820"))
+	else:
+		_draw_mission_offer()
 
-	# Context action button.
-	var action_color := Color("55e6a5") if _has_context_action() else Color(0.35, 0.40, 0.43, 0.72)
-	draw_circle(ACTION_CENTER, ACTION_RADIUS, action_color)
-	draw_circle(ACTION_CENTER, ACTION_RADIUS, Color.WHITE, false, 3.0)
-	draw_string(ThemeDB.fallback_font, ACTION_CENTER + Vector2(-39, 6), _action_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("101820"))
+func _draw_mission_offer() -> void:
+	# Dim the world and present a large thumb-friendly mission card.
+	draw_rect(Rect2(0, 82, 1280, 638), Color(0, 0, 0, 0.55))
+	var card := Rect2(300, 145, 680, 455)
+	draw_rect(card, Color("18232b"))
+	draw_rect(card, Color("d7b85b"), false, 4.0)
+	draw_string(ThemeDB.fallback_font, Vector2(345, 195), "YENİ İŞ TEKLİFİ", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("d7b85b"))
+	draw_string(ThemeDB.fallback_font, Vector2(345, 235), "Sınır Meselesi", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(345, 280), "Köylü: 'Tarlamızın sınırı yüzünden komşumla anlaşamıyoruz.'", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("d6e1e6"))
+	draw_string(ThemeDB.fallback_font, Vector2(345, 312), "Dört köşe noktasını ölç ve parselin alanını belirle.", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("d6e1e6"))
+	draw_string(ThemeDB.fallback_font, Vector2(345, 365), "Saha: F    Ofis: F    Tehlike: F", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("a9c5d2"))
+	draw_string(ThemeDB.fallback_font, Vector2(345, 405), "Ödül: 250 para  •  100 XP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("55e6a5"))
+	draw_string(ThemeDB.fallback_font, Vector2(345, 448), "Hedef: 4 sınır noktası", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+	draw_rect(ACCEPT_RECT, Color("55e6a5"))
+	draw_rect(REJECT_RECT, Color("7b4545"))
+	draw_string(ThemeDB.fallback_font, Vector2(762, 554), "KABUL ET", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("101820"))
+	draw_string(ThemeDB.fallback_font, Vector2(974, 554), "REDDET", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 
 func _has_context_action() -> bool:
 	if player_position.distance_to(NPC_POSITION) <= INTERACT_DISTANCE:
