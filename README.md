@@ -1,21 +1,28 @@
 # Surveyor Beyond
 
-Haritacılık ve ölçme mesleğini merkezine alan Godot 4 tabanlı mobil RPG + simülasyon oyunu.
+Haritacılık ve ölçme mesleğini merkezine alan **mobil öncelikli** Godot 4 RPG + simülasyon oyunu.
 
 ## M0 — İlk Ölçüm
 
-İlk oynanabilir prototipin hedefi:
-- Oyuncu sahada hareket eder.
-- Köylü NPC ile konuşup **Sınır Meselesi** görevini kabul eder.
-- Dört hedef köşe noktasına gidip ölçüm yapar.
-- Ölçülen poligon kapanınca alan ve çevre hesaplanır.
-- NPC'ye dönüp işi teslim eder.
-- 250 para ve 100 XP kazanır.
+İlk oynanabilir prototipte oyuncu köylü NPC'den **Sınır Meselesi** görevini alır, dört sınır köşesini ölçer, poligonun alan/çevre hesabını tamamlar ve işi teslim ederek 250 para + 100 XP kazanır.
 
-## Kontroller
+## Mobil Kontroller
 
-- Yön tuşları: hareket
-- `Space` / `Enter`: etkileşim, ölçüm ve görev teslimi
+Mobil oyun ana hedeftir. Temel oynanış klavye gerektirmeyecek şekilde tasarlanır:
+
+- Sol alt: analog sanal joystick — karakter hareketi.
+- Sağ alt: bağlama duyarlı dokunmatik eylem düğmesi.
+- Düğme yakındaki duruma göre `KONUŞ`, `ÖLÇ`, `TESLİM` veya `ETKİLEŞ` işlevine dönüşür.
+- Çoklu dokunma desteklenir; oyuncu joystick'i tutarken eylem düğmesine dokunabilir.
+- Klavye kontrolleri yalnızca masaüstünde geliştirme/test kolaylığı için korunur.
+
+## Mobil UX İlkeleri
+
+- Ana eylemler ekran kenarlarında başparmak erişim alanında olacak.
+- Küçük tıklama hedeflerinden kaçınılacak.
+- Menü, görev seçimi, diyalog ve ekipman işlemleri dokunmatik kart/butonlarla yapılacak.
+- Kritik işlemlerde görsel durum ve geri bildirim gösterilecek.
+- Oyun 16:9 yatay mobil ekran temel alınarak geliştirilecek.
 
 ## Çalıştırma
 
@@ -25,10 +32,10 @@ Haritacılık ve ölçme mesleğini merkezine alan Godot 4 tabanlı mobil RPG + 
 
 ## Yol Haritası
 
-- v0.0.1: Hareket ve temel dünya
-- v0.0.2: NPC + görev kabul/teslim sistemi
+- v0.0.1: Mobil hareket + temel dünya
+- v0.0.2: Dokunmatik NPC/görev kabul/teslim sistemi
 - v0.0.3: Ölçüm doğruluğu, kapanma hatası ve parsel hesabı
-- v0.0.4: Ofis/proje akışı
+- v0.0.4: Dokunmatik ofis/proje akışı
 - v0.0.5: XP, para ve karakter gelişimi
 
 > Görseller şu an programcı grafikleri. Oynanış temeli oturduktan sonra modern atmosferik pixel-art dünyaya geçilecek.
