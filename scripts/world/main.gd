@@ -3,6 +3,7 @@ extends Node2D
 const SPEED := 260.0
 const INTERACT_DISTANCE := 70.0
 const TARGET_TOLERANCE := 58.0
+const MEASURE_DURATION := 1.35
 const NPC_POSITION := Vector2(170, 360)
 const JOYSTICK_CENTER := Vector2(135, 585)
 const JOYSTICK_RADIUS := 82.0
@@ -22,6 +23,10 @@ var money := 0
 var xp := 0
 var status_message := "Köylünün yanına git ve KONUŞ düğmesine dokun."
 var mission_offer_open := false
+var measurement_active := false
+var measurement_progress := 0.0
+var measurement_target_index := -1
+var last_measure_quality := ""
 var move_touch_id := -1
 var action_touch_id := -1
 var joystick_knob := JOYSTICK_CENTER
@@ -33,8 +38,12 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var keyboard_vector := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	var direction := touch_move_vector if touch_move_vector.length() > 0.01 else keyboard_vector
-	if not mission_offer_open:
+	if not mission_offer_open and not measurement_active:
 		player_position += direction.normalized() * SPEED * delta
+	if measurement_active:
+		measurement_progress += delta / MEASURE_DURATION
+		if measurement_progress >= 1.0:
+			_finish_measurement()
 	player_position.x = clamp(player_position.x, 35.0, 1245.0)
 	player_position.y = clamp(player_position.y, 105.0, 685.0)
 	queue_redraw()
@@ -44,7 +53,7 @@ func _input(event: InputEvent) -> void:
 		_handle_screen_touch(event)
 	elif event is InputEventScreenDrag:
 		_handle_screen_drag(event)
-	elif event.is_action_pressed("ui_accept") and not mission_offer_open:
+	elif event.is_action_pressed("ui_accept") and not mission_offer_open and not measurement_active:
 		perform_action()
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
@@ -54,6 +63,8 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 				_accept_mission()
 			elif REJECT_RECT.has_point(event.position):
 				_reject_mission()
+			return
+		if measurement_active:
 			return
 		if event.position.distance_to(ACTION_CENTER) <= ACTION_RADIUS * 1.35 and action_touch_id == -1:
 			action_touch_id = event.index
@@ -71,7 +82,7 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	queue_redraw()
 
 func _handle_screen_drag(event: InputEventScreenDrag) -> void:
-	if event.index == move_touch_id and not mission_offer_open:
+	if event.index == move_touch_id and not mission_offer_open and not measurement_active:
 		_update_joystick(event.position)
 		queue_redraw()
 
@@ -97,8 +108,7 @@ func _interact_with_npc() -> void:
 	match mission_state:
 		MissionState.NOT_STARTED:
 			mission_offer_open = true
-			touch_move_vector = Vector2.ZERO
-			joystick_knob = JOYSTICK_CENTER
+			_stop_movement()
 			status_message = "Görev teklifi açıldı."
 		MissionState.ACTIVE:
 			status_message = "Köylü: Önce dört sınır noktasını ölçmelisin."
@@ -134,14 +144,33 @@ func _try_measure_target() -> void:
 	if closest_index == -1 or closest_distance > TARGET_TOLERANCE:
 		status_message = "Ölçüm için sarı sınır noktasına biraz daha yaklaş."
 		return
-	measured_target_indices.append(closest_index)
-	measured_points.append(TARGETS[closest_index])
-	status_message = "P%d ölçüldü. (%d/%d)" % [closest_index + 1, measured_points.size(), TARGETS.size()]
+	measurement_active = true
+	measurement_progress = 0.0
+	measurement_target_index = closest_index
+	last_measure_quality = ""
+	_stop_movement()
+	status_message = "P%d ölçülüyor... cihazı sabit tut." % (closest_index + 1)
+
+func _finish_measurement() -> void:
+	measurement_active = false
+	measurement_progress = 1.0
+	var index := measurement_target_index
+	measurement_target_index = -1
+	if index < 0 or index in measured_target_indices:
+		return
+	measured_target_indices.append(index)
+	measured_points.append(TARGETS[index])
+	last_measure_quality = "İYİ"
+	status_message = "P%d kaydedildi • Kalite: %s • (%d/%d)" % [index + 1, last_measure_quality, measured_points.size(), TARGETS.size()]
 	if measured_points.size() == TARGETS.size():
 		mission_state = MissionState.READY_TO_DELIVER
 		var area := SurveyMath.polygon_area(measured_points)
 		var perimeter := SurveyMath.polygon_perimeter(measured_points)
 		status_message = "Ölçüm tamam: %.1f m² / %.1f m. Köylüye dön." % [area, perimeter]
+
+func _stop_movement() -> void:
+	touch_move_vector = Vector2.ZERO
+	joystick_knob = JOYSTICK_CENTER
 
 func _draw() -> void:
 	draw_rect(Rect2(0, 0, 1280, 720), Color("1c3827"))
@@ -156,7 +185,10 @@ func _draw() -> void:
 	for i in range(TARGETS.size()):
 		var target := TARGETS[i]
 		var done := i in measured_target_indices
+		var active := measurement_active and i == measurement_target_index
 		var marker_color := Color("55e6a5") if done else Color("e7c75f")
+		if active:
+			marker_color = Color("4db6ff")
 		draw_circle(target, 10, marker_color)
 		draw_circle(target, 18, marker_color, false, 2.0)
 		draw_string(ThemeDB.fallback_font, target + Vector2(22, 6), "P%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, marker_color)
@@ -174,19 +206,33 @@ func _draw() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(960, 32), "Para: %d   XP: %d" % [money, xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(930, 62), _mission_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e7c75f"))
 
-	if not mission_offer_open:
-		draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.05, 0.08, 0.10, 0.55))
-		draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.75, 0.85, 0.90, 0.55), false, 3.0)
-		draw_circle(joystick_knob, 34, Color(0.75, 0.85, 0.90, 0.82))
-		var action_color := Color("55e6a5") if _has_context_action() else Color(0.35, 0.40, 0.43, 0.72)
-		draw_circle(ACTION_CENTER, ACTION_RADIUS, action_color)
-		draw_circle(ACTION_CENTER, ACTION_RADIUS, Color.WHITE, false, 3.0)
-		draw_string(ThemeDB.fallback_font, ACTION_CENTER + Vector2(-39, 6), _action_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("101820"))
-	else:
+	if mission_offer_open:
 		_draw_mission_offer()
+	elif measurement_active:
+		_draw_measurement_overlay()
+	else:
+		_draw_mobile_controls()
+
+func _draw_mobile_controls() -> void:
+	draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.05, 0.08, 0.10, 0.55))
+	draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.75, 0.85, 0.90, 0.55), false, 3.0)
+	draw_circle(joystick_knob, 34, Color(0.75, 0.85, 0.90, 0.82))
+	var action_color := Color("55e6a5") if _has_context_action() else Color(0.35, 0.40, 0.43, 0.72)
+	draw_circle(ACTION_CENTER, ACTION_RADIUS, action_color)
+	draw_circle(ACTION_CENTER, ACTION_RADIUS, Color.WHITE, false, 3.0)
+	draw_string(ThemeDB.fallback_font, ACTION_CENTER + Vector2(-39, 6), _action_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("101820"))
+
+func _draw_measurement_overlay() -> void:
+	var panel := Rect2(390, 535, 500, 105)
+	draw_rect(panel, Color(0.05, 0.08, 0.10, 0.88))
+	draw_rect(panel, Color("4db6ff"), false, 3.0)
+	draw_string(ThemeDB.fallback_font, Vector2(425, 570), "ÖLÇÜM ALINIYOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
+	var track := Rect2(425, 592, 430, 20)
+	draw_rect(track, Color("26343d"))
+	draw_rect(Rect2(track.position, Vector2(track.size.x * clamp(measurement_progress, 0.0, 1.0), track.size.y)), Color("55e6a5"))
+	draw_string(ThemeDB.fallback_font, Vector2(425, 632), "%%%d" % int(clamp(measurement_progress, 0.0, 1.0) * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("a9c5d2"))
 
 func _draw_mission_offer() -> void:
-	# Dim the world and present a large thumb-friendly mission card.
 	draw_rect(Rect2(0, 82, 1280, 638), Color(0, 0, 0, 0.55))
 	var card := Rect2(300, 145, 680, 455)
 	draw_rect(card, Color("18232b"))
