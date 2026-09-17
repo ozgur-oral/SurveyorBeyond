@@ -1,0 +1,11 @@
+{
+  "id": "primitive_measurement_kit",
+  "name": "İlkel Ölçüm Seti",
+  "category": "manual_survey",
+  "era": 1,
+  "measurement_duration_seconds": 1.35,
+  "horizontal_accuracy_m": 0.18,
+  "required_measurement_skill": 0,
+  "research_required": false,
+  "description": "Yeni dünyada eldeki basit malzemelerle oluşturulan ilk ölçüm seti. Hızlıca kullanılabilir ancak hassasiyeti düşüktür."
+}
