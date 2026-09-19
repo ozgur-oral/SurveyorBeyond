@@ -4,6 +4,10 @@ const SPEED := 260.0
 const INTERACT_DISTANCE := 70.0
 const TARGET_TOLERANCE := 58.0
 const MEASURE_DURATION := 1.35
+const ACCEPTANCE_TOLERANCE_M := 0.20
+const EQUIPMENT_ACCURACY_M := 0.18
+const MEASUREMENT_SKILL := 0
+const RETAKE_RECTS: Array[Rect2] = [Rect2(345, 450, 130, 62), Rect2(495, 450, 130, 62), Rect2(645, 450, 130, 62), Rect2(795, 450, 130, 62)]
 const NPC_POSITION := Vector2(170, 360)
 const JOYSTICK_CENTER := Vector2(135, 585)
 const JOYSTICK_RADIUS := 82.0
@@ -18,6 +22,9 @@ enum MissionState { NOT_STARTED, ACTIVE, READY_TO_DELIVER, COMPLETED }
 var player_position := Vector2(250, 360)
 var measured_points: Array[Vector2] = []
 var measured_target_indices: Array[int] = []
+var observations: Dictionary = {}
+var review_open := false
+var discrepancy_m := 0.0
 var mission_state := MissionState.NOT_STARTED
 var money := 0
 var xp := 0
@@ -38,7 +45,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var keyboard_vector := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	var direction := touch_move_vector if touch_move_vector.length() > 0.01 else keyboard_vector
-	if not mission_offer_open and not measurement_active:
+	if not mission_offer_open and not measurement_active and not review_open:
 		player_position += direction.normalized() * SPEED * delta
 	if measurement_active:
 		measurement_progress += delta / MEASURE_DURATION
@@ -58,6 +65,11 @@ func _input(event: InputEvent) -> void:
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if event.pressed:
+		if review_open:
+			for i in range(RETAKE_RECTS.size()):
+				if RETAKE_RECTS[i].has_point(event.position):
+					_select_retake(i)
+			return
 		if mission_offer_open:
 			if ACCEPT_RECT.has_point(event.position):
 				_accept_mission()
@@ -158,15 +170,37 @@ func _finish_measurement() -> void:
 	measurement_target_index = -1
 	if index < 0 or index in measured_target_indices:
 		return
+	var observation := MeasurementModel.make_observation(TARGETS[index], EQUIPMENT_ACCURACY_M, MEASUREMENT_SKILL)
+	observations[index] = observation
 	measured_target_indices.append(index)
-	measured_points.append(TARGETS[index])
-	last_measure_quality = "İYİ"
+	last_measure_quality = str(observation["quality"])
+	_rebuild_measured_points()
 	status_message = "P%d kaydedildi • Kalite: %s • (%d/%d)" % [index + 1, last_measure_quality, measured_points.size(), TARGETS.size()]
 	if measured_points.size() == TARGETS.size():
+		var ordered_truth: Array[Vector2] = TARGETS.duplicate()
+		discrepancy_m = MeasurementModel.closure_error_m(measured_points, ordered_truth)
+		if discrepancy_m > ACCEPTANCE_TOLERANCE_M:
+			review_open = true
+			_stop_movement()
+			status_message = "Kontrol farkı %.2f m; yeniden ölçülecek noktayı seç." % discrepancy_m
+			return
 		mission_state = MissionState.READY_TO_DELIVER
 		var area := SurveyMath.polygon_area(measured_points)
 		var perimeter := SurveyMath.polygon_perimeter(measured_points)
 		status_message = "Ölçüm tamam: %.1f m² / %.1f m. Köylüye dön." % [area, perimeter]
+
+func _rebuild_measured_points() -> void:
+	measured_points.clear()
+	for i in range(TARGETS.size()):
+		if observations.has(i):
+			measured_points.append(observations[i]["point"])
+
+func _select_retake(index: int) -> void:
+	review_open = false
+	observations.erase(index)
+	measured_target_indices.erase(index)
+	_rebuild_measured_points()
+	status_message = "P%d tekrar ölçülecek. Noktaya git ve ÖLÇ düğmesine dokun." % (index + 1)
 
 func _stop_movement() -> void:
 	touch_move_vector = Vector2.ZERO
@@ -206,12 +240,24 @@ func _draw() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(960, 32), "Para: %d   XP: %d" % [money, xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(930, 62), _mission_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e7c75f"))
 
-	if mission_offer_open:
+	if review_open:
+		_draw_retake_review()
+	elif mission_offer_open:
 		_draw_mission_offer()
 	elif measurement_active:
 		_draw_measurement_overlay()
 	else:
 		_draw_mobile_controls()
+
+func _draw_retake_review() -> void:
+	draw_rect(Rect2(0, 82, 1280, 638), Color(0, 0, 0, 0.65))
+	draw_rect(Rect2(285, 265, 710, 285), Color("18232b"))
+	draw_string(ThemeDB.fallback_font, Vector2(330, 325), "KONTROL: YENİDEN ÖLÇÜM GEREKLİ", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(330, 370), "Ortalama kontrol farkı: %.2f m / sınır: %.2f m" % [discrepancy_m, ACCEPTANCE_TOLERANCE_M], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color("e7c75f"))
+	draw_string(ThemeDB.fallback_font, Vector2(330, 415), "Tekrar ölçmek istediğin noktaya dokun:", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+	for i in range(RETAKE_RECTS.size()):
+		draw_rect(RETAKE_RECTS[i], Color("4a8176"))
+		draw_string(ThemeDB.fallback_font, RETAKE_RECTS[i].position + Vector2(43, 39), "P%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
 
 func _draw_mobile_controls() -> void:
 	draw_circle(JOYSTICK_CENTER, JOYSTICK_RADIUS, Color(0.05, 0.08, 0.10, 0.55))
